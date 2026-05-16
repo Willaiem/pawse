@@ -1,26 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
-type MonitorInfo = {
-  index: number;
-  name: string;
-  width: number;
-  height: number;
-  x: number;
-  y: number;
-  is_primary: boolean;
-};
-
-type MonitorRef = { x: number; y: number; width: number; height: number };
-
-type ForegroundSnapshot = {
-  exe: string | null;
-  idle_for_secs: number;
-  is_fullscreen: boolean;
-  monitor_index: number | null;
-  monitor: MonitorRef | null;
-};
-
 type AppState =
   | { kind: "idle"; remaining_secs: number }
   | { kind: "active"; remaining_secs: number }
@@ -36,98 +16,55 @@ type Config = {
   autostart: boolean;
 };
 
-let greetInputEl: HTMLInputElement | null;
-let greetMsgEl: HTMLElement | null;
-let trackedAppsCache: string[] = [];
+type RunningProcess = { exe: string; title: string };
 
-async function greet() {
-  if (greetMsgEl && greetInputEl) {
-    greetMsgEl.textContent = await invoke("greet", { name: greetInputEl.value });
-  }
+const SUGGESTIONS = ["Discord.exe", "Steam.exe", "slack.exe"];
+
+let currentConfig: Config | null = null;
+
+function $(sel: string) {
+  return document.querySelector(sel);
 }
 
-async function refreshMonitors() {
-  const list = document.querySelector<HTMLDivElement>("#monitor-list");
-  if (!list) return;
-  try {
-    const monitors = await invoke<MonitorInfo[]>("list_monitors");
-    list.innerHTML = "";
-    if (monitors.length === 0) {
-      list.textContent = "No monitors detected.";
-      return;
-    }
-    for (const m of monitors) {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "monitor-btn";
-      btn.textContent = `Monitor ${m.index} — ${m.width}×${m.height}${m.is_primary ? " · primary" : ""}`;
-      btn.addEventListener("click", async () => {
-        try {
-          await invoke("show_cat", { monitorIndex: m.index });
-        } catch (err) {
-          console.error("show_cat failed:", err);
-        }
-      });
-      list.appendChild(btn);
-    }
-  } catch (err) {
-    list.textContent = `Failed to list monitors: ${err}`;
-  }
-}
-
-function formatIdle(secs: number): string {
+function formatRemaining(secs: number): string {
+  if (secs <= 0) return "0s";
   if (secs < 60) return `${secs}s`;
   const m = Math.floor(secs / 60);
   const s = secs % 60;
-  return `${m}m ${s}s`;
+  if (secs >= 3600) {
+    const h = Math.floor(secs / 3600);
+    const mm = Math.floor((secs % 3600) / 60);
+    return mm === 0 ? `${h}h` : `${h}h ${mm}m`;
+  }
+  return s === 0 ? `${m}m` : `${m}m ${s}s`;
 }
 
-function formatRemaining(state: AppState): string {
+function renderState(state: AppState) {
+  const kindEl = $("#state-kind") as HTMLElement | null;
+  const remEl = $("#state-remaining") as HTMLElement | null;
+  if (kindEl) {
+    kindEl.textContent = state.kind.replace("_", " ");
+    kindEl.dataset.kind = state.kind;
+  }
+  if (!remEl) return;
   switch (state.kind) {
     case "idle":
     case "active":
     case "break":
-      return formatIdle(state.remaining_secs);
+      remEl.textContent = formatRemaining(state.remaining_secs);
+      break;
     case "snoozed": {
       const left = Math.max(0, state.until_unix - Math.floor(Date.now() / 1000));
-      return `${formatIdle(left)} left`;
+      remEl.textContent = `${formatRemaining(left)} left`;
+      break;
     }
     case "deferred_break":
-      return "waiting for fullscreen exit";
+      remEl.textContent = "waiting for fullscreen exit";
+      break;
   }
 }
 
-async function pollSnapshot() {
-  const exeEl = document.querySelector<HTMLElement>("#snap-exe");
-  const idleEl = document.querySelector<HTMLElement>("#snap-idle");
-  const fsEl = document.querySelector<HTMLElement>("#snap-fullscreen");
-  const monEl = document.querySelector<HTMLElement>("#snap-monitor");
-  try {
-    const snap = await invoke<ForegroundSnapshot>("current_snapshot");
-    if (exeEl) exeEl.textContent = snap.exe ?? "(none)";
-    if (idleEl) idleEl.textContent = formatIdle(snap.idle_for_secs);
-    if (fsEl) fsEl.textContent = snap.is_fullscreen ? "yes" : "no";
-    if (monEl) {
-      monEl.textContent = snap.monitor_index === null
-        ? "(unknown)"
-        : `#${snap.monitor_index}${snap.monitor ? ` · ${snap.monitor.width}×${snap.monitor.height} @ (${snap.monitor.x},${snap.monitor.y})` : ""}`;
-    }
-  } catch (err) {
-    if (exeEl) exeEl.textContent = `error: ${err}`;
-  }
-}
-
-function renderState(state: AppState) {
-  const kindEl = document.querySelector<HTMLElement>("#state-kind");
-  const remEl = document.querySelector<HTMLElement>("#state-remaining");
-  if (kindEl) {
-    kindEl.textContent = state.kind;
-    kindEl.dataset.kind = state.kind;
-  }
-  if (remEl) remEl.textContent = formatRemaining(state);
-}
-
-async function pollAppState() {
+async function pollState() {
   try {
     renderState(await invoke<AppState>("get_app_state"));
   } catch (err) {
@@ -135,163 +72,258 @@ async function pollAppState() {
   }
 }
 
-function renderConfig(cfg: Config) {
-  trackedAppsCache = cfg.tracked_apps;
-  const usageEl = document.querySelector<HTMLInputElement>("#cfg-usage");
-  const breakEl = document.querySelector<HTMLInputElement>("#cfg-break");
-  if (usageEl && document.activeElement !== usageEl) usageEl.value = String(cfg.usage_minutes);
-  if (breakEl && document.activeElement !== breakEl) breakEl.value = String(cfg.break_minutes);
+function avatarLetter(exe: string): string {
+  return (exe.replace(/\.exe$/i, "").charAt(0) || "?").toUpperCase();
+}
 
-  const list = document.querySelector<HTMLUListElement>("#tracked-list");
+function renderTrackedApps(cfg: Config) {
+  const list = $("#tracked-list") as HTMLUListElement | null;
   if (!list) return;
   list.innerHTML = "";
   if (cfg.tracked_apps.length === 0) {
     const li = document.createElement("li");
     li.className = "tracked-empty";
-    li.textContent = "No tracked apps yet — add one below.";
+    li.textContent = "No tracked apps yet — pick one above to start.";
     list.appendChild(li);
     return;
   }
   for (const exe of cfg.tracked_apps) {
     const li = document.createElement("li");
     li.className = "tracked-item";
+
+    const name = document.createElement("div");
+    name.className = "tracked-name";
+    const avatar = document.createElement("span");
+    avatar.className = "tracked-avatar";
+    avatar.textContent = avatarLetter(exe);
     const label = document.createElement("span");
     label.textContent = exe;
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.textContent = "Remove";
-    btn.addEventListener("click", async () => {
+    name.appendChild(avatar);
+    name.appendChild(label);
+
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "btn-danger";
+    remove.textContent = "Remove";
+    remove.addEventListener("click", async () => {
       try {
         const next = await invoke<Config>("remove_tracked_app", { exe });
-        renderConfig(next);
+        applyConfig(next);
       } catch (err) {
         console.error("remove_tracked_app failed:", err);
       }
     });
-    li.appendChild(label);
-    li.appendChild(btn);
+
+    li.appendChild(name);
+    li.appendChild(remove);
     list.appendChild(li);
   }
 }
 
+function renderSuggestions(cfg: Config) {
+  const row = $("#suggestion-row") as HTMLElement | null;
+  if (!row) return;
+  row.innerHTML = "";
+  for (const exe of SUGGESTIONS) {
+    const tracked = cfg.tracked_apps.some((t) => t.toLowerCase() === exe.toLowerCase());
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "suggestion-chip";
+    chip.setAttribute("aria-pressed", tracked ? "true" : "false");
+    chip.textContent = exe.replace(/\.exe$/i, "");
+    chip.title = tracked ? `Remove ${exe}` : `Add ${exe}`;
+    chip.addEventListener("click", async () => {
+      try {
+        const next = tracked
+          ? await invoke<Config>("remove_tracked_app", { exe })
+          : await invoke<Config>("add_tracked_app", { exe });
+        applyConfig(next);
+      } catch (err) {
+        console.error("toggle suggestion failed:", err);
+      }
+    });
+    row.appendChild(chip);
+  }
+}
+
+function renderLimits(cfg: Config) {
+  const usage = $("#cfg-usage") as HTMLInputElement | null;
+  const brk = $("#cfg-break") as HTMLInputElement | null;
+  if (usage && document.activeElement !== usage) usage.value = String(cfg.usage_minutes);
+  if (brk && document.activeElement !== brk) brk.value = String(cfg.break_minutes);
+}
+
+function renderAutostart(cfg: Config) {
+  const el = $("#cfg-autostart") as HTMLInputElement | null;
+  if (el) el.checked = cfg.autostart;
+}
+
+function applyConfig(cfg: Config) {
+  currentConfig = cfg;
+  renderTrackedApps(cfg);
+  renderSuggestions(cfg);
+  renderLimits(cfg);
+  renderAutostart(cfg);
+}
+
 async function refreshConfig() {
   try {
-    renderConfig(await invoke<Config>("get_config"));
+    applyConfig(await invoke<Config>("get_config"));
   } catch (err) {
     console.error("get_config failed:", err);
   }
 }
 
-function renderRecent(exes: string[]) {
-  const list = document.querySelector<HTMLDivElement>("#recent-list");
-  if (!list) return;
-  list.innerHTML = "";
-  if (exes.length === 0) {
-    const span = document.createElement("span");
-    span.className = "recent-empty";
-    span.textContent = "focus another app to populate";
-    list.appendChild(span);
-    return;
-  }
-  for (const exe of exes) {
-    const chip = document.createElement("button");
-    chip.type = "button";
-    chip.className = "recent-chip";
-    const isTracked = trackedAppsCache.some((t) => t.toLowerCase() === exe.toLowerCase());
-    chip.disabled = isTracked;
-    chip.textContent = isTracked ? `${exe} ✓` : exe;
-    chip.title = isTracked ? "already tracked" : `Track ${exe}`;
-    chip.addEventListener("click", async () => {
-      try {
-        const next = await invoke<Config>("add_tracked_app", { exe });
-        renderConfig(next);
-      } catch (err) {
-        console.error("add_tracked_app failed:", err);
-      }
-    });
-    list.appendChild(chip);
-  }
-}
-
-async function pollRecent() {
-  try {
-    renderRecent(await invoke<string[]>("recent_foregrounds"));
-  } catch (err) {
-    console.error("recent_foregrounds failed:", err);
-  }
-}
-
-function wireStateControls() {
-  document.querySelector("#cfg-usage")?.addEventListener("change", async (e) => {
-    const target = e.target as HTMLInputElement;
-    const n = Number(target.value);
+function wireLimits() {
+  ($("#cfg-usage") as HTMLInputElement | null)?.addEventListener("change", async (e) => {
+    const n = Number((e.target as HTMLInputElement).value);
     if (!Number.isFinite(n)) return;
     try {
-      renderConfig(await invoke<Config>("set_usage_minutes", { minutes: n }));
+      applyConfig(await invoke<Config>("set_usage_minutes", { minutes: n }));
     } catch (err) {
       console.error("set_usage_minutes failed:", err);
       refreshConfig();
     }
   });
-  document.querySelector("#cfg-break")?.addEventListener("change", async (e) => {
-    const target = e.target as HTMLInputElement;
-    const n = Number(target.value);
+  ($("#cfg-break") as HTMLInputElement | null)?.addEventListener("change", async (e) => {
+    const n = Number((e.target as HTMLInputElement).value);
     if (!Number.isFinite(n)) return;
     try {
-      renderConfig(await invoke<Config>("set_break_minutes", { minutes: n }));
+      applyConfig(await invoke<Config>("set_break_minutes", { minutes: n }));
     } catch (err) {
       console.error("set_break_minutes failed:", err);
       refreshConfig();
     }
   });
-  document.querySelector("#snooze-btn")?.addEventListener("click", async () => {
+  ($("#cfg-autostart") as HTMLInputElement | null)?.addEventListener("change", async (e) => {
+    const enabled = (e.target as HTMLInputElement).checked;
     try {
-      const next = await invoke<AppState>("snooze", { seconds: 30 * 60 });
-      renderState(next);
+      applyConfig(await invoke<Config>("set_autostart", { enabled }));
     } catch (err) {
-      console.error("snooze failed:", err);
+      console.error("set_autostart failed:", err);
+      refreshConfig();
     }
   });
-  document.querySelector("#tracked-add")?.addEventListener("click", async () => {
-    const input = document.querySelector<HTMLInputElement>("#tracked-input");
-    if (!input) return;
-    const exe = input.value.trim();
-    if (!exe) return;
-    try {
-      const next = await invoke<Config>("add_tracked_app", { exe });
-      input.value = "";
-      renderConfig(next);
-    } catch (err) {
-      console.error("add_tracked_app failed:", err);
+}
+
+let pickerProcesses: RunningProcess[] = [];
+
+async function openPicker() {
+  const overlay = $("#picker-overlay") as HTMLElement | null;
+  const search = $("#picker-search") as HTMLInputElement | null;
+  if (!overlay) return;
+  overlay.hidden = false;
+  if (search) {
+    search.value = "";
+    queueMicrotask(() => search.focus());
+  }
+  await loadPickerProcesses();
+}
+
+function closePicker() {
+  const overlay = $("#picker-overlay") as HTMLElement | null;
+  if (overlay) overlay.hidden = true;
+}
+
+async function loadPickerProcesses() {
+  const list = $("#picker-list") as HTMLUListElement | null;
+  if (list) list.innerHTML = '<li class="picker-empty">Loading running apps…</li>';
+  try {
+    pickerProcesses = await invoke<RunningProcess[]>("list_running_processes");
+  } catch (err) {
+    console.error("list_running_processes failed:", err);
+    if (list) list.innerHTML = '<li class="picker-empty">Failed to load apps.</li>';
+    return;
+  }
+  renderPickerList();
+}
+
+function renderPickerList() {
+  const list = $("#picker-list") as HTMLUListElement | null;
+  const search = $("#picker-search") as HTMLInputElement | null;
+  if (!list) return;
+  const q = (search?.value ?? "").trim().toLowerCase();
+  const tracked = new Set((currentConfig?.tracked_apps ?? []).map((t) => t.toLowerCase()));
+
+  const filtered = pickerProcesses.filter((p) => {
+    if (!q) return true;
+    return p.exe.toLowerCase().includes(q) || p.title.toLowerCase().includes(q);
+  });
+
+  list.innerHTML = "";
+  if (filtered.length === 0) {
+    const empty = document.createElement("li");
+    empty.className = "picker-empty";
+    empty.textContent = pickerProcesses.length === 0
+      ? "No user-facing apps detected. Try Refresh."
+      : "No matches.";
+    list.appendChild(empty);
+    return;
+  }
+
+  for (const p of filtered) {
+    const li = document.createElement("li");
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "picker-item";
+    const isTracked = tracked.has(p.exe.toLowerCase());
+    btn.disabled = isTracked;
+
+    const avatar = document.createElement("span");
+    avatar.className = "tracked-avatar";
+    avatar.textContent = avatarLetter(p.exe);
+
+    const meta = document.createElement("span");
+    meta.className = "picker-meta";
+    const exeLine = document.createElement("span");
+    exeLine.className = "picker-exe";
+    exeLine.textContent = isTracked ? `${p.exe} (already tracked)` : p.exe;
+    meta.appendChild(exeLine);
+    if (p.title) {
+      const titleLine = document.createElement("span");
+      titleLine.className = "picker-title-line";
+      titleLine.textContent = p.title;
+      meta.appendChild(titleLine);
+    }
+
+    btn.appendChild(avatar);
+    btn.appendChild(meta);
+    btn.addEventListener("click", async () => {
+      try {
+        applyConfig(await invoke<Config>("add_tracked_app", { exe: p.exe }));
+        closePicker();
+      } catch (err) {
+        console.error("add_tracked_app failed:", err);
+      }
+    });
+    li.appendChild(btn);
+    list.appendChild(li);
+  }
+}
+
+function wirePicker() {
+  $("#open-picker")?.addEventListener("click", openPicker);
+  $("#picker-close")?.addEventListener("click", closePicker);
+  $("#picker-refresh")?.addEventListener("click", loadPickerProcesses);
+  $("#picker-overlay")?.addEventListener("click", (e) => {
+    if (e.target === e.currentTarget) closePicker();
+  });
+  ($("#picker-search") as HTMLInputElement | null)?.addEventListener("input", renderPickerList);
+  window.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      const overlay = $("#picker-overlay") as HTMLElement | null;
+      if (overlay && !overlay.hidden) closePicker();
     }
   });
 }
 
 window.addEventListener("DOMContentLoaded", () => {
-  greetInputEl = document.querySelector("#greet-input");
-  greetMsgEl = document.querySelector("#greet-msg");
-  document.querySelector("#greet-form")?.addEventListener("submit", (e) => {
-    e.preventDefault();
-    greet();
-  });
-  document.querySelector("#hide-cat")?.addEventListener("click", () => {
-    invoke("hide_cat").catch((err) => console.error("hide_cat failed:", err));
-  });
-
-  refreshMonitors();
+  wireLimits();
+  wirePicker();
   refreshConfig();
-  pollSnapshot();
-  pollAppState();
-  pollRecent();
-  setInterval(pollSnapshot, 1000);
-  setInterval(pollAppState, 1000);
-  setInterval(pollRecent, 1500);
+  pollState();
+  setInterval(pollState, 1000);
 
   listen<AppState>("state-changed", (e) => renderState(e.payload));
-  listen<Config>("config-changed", (e) => {
-    renderConfig(e.payload);
-    pollRecent();
-  });
-
-  wireStateControls();
+  listen<Config>("config-changed", (e) => applyConfig(e.payload));
 });

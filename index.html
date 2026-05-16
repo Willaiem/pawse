@@ -4,64 +4,80 @@
     <meta charset="UTF-8" />
     <link rel="stylesheet" href="/src/styles.css" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>pawse</title>
+    <title>pawse — settings</title>
     <script type="module" src="/src/main.ts" defer></script>
   </head>
 
   <body>
-    <main class="container">
-      <h1>pawse</h1>
-      <p class="tagline">Gentle interruption: a cat reminds you when an app's been on top too long.</p>
-
-      <section class="panel">
-        <h2>Cat overlay (M1)</h2>
-        <p>Pick a monitor to play the cat on. Auto-closes after 5 seconds.</p>
-        <div id="monitor-list" class="monitor-list">loading monitors…</div>
-        <button id="hide-cat" type="button">Hide cat now</button>
-      </section>
-
-      <section class="panel">
-        <h2>State machine (M3)</h2>
-        <div class="state-kind"><span id="state-kind">—</span> <span id="state-remaining" class="state-remaining"></span></div>
-        <div class="state-controls">
-          <label>Usage minutes <input id="cfg-usage" type="number" min="1" max="600" /></label>
-          <label>Break minutes <input id="cfg-break" type="number" min="1" max="60" /></label>
+    <main class="settings">
+      <header class="settings-header">
+        <h1>pawse</h1>
+        <div class="state-pill">
+          <span id="state-kind" data-kind="idle">idle</span>
+          <span id="state-remaining" class="state-remaining"></span>
         </div>
-        <div class="state-controls">
-          <button id="snooze-btn" type="button">Snooze 30 min</button>
+      </header>
+
+      <section class="settings-section">
+        <div class="section-head">
+          <h2>Tracked apps</h2>
+          <button id="open-picker" class="btn-primary" type="button">Add app…</button>
         </div>
-        <h3>Tracked apps</h3>
+
+        <div class="suggestions">
+          <span class="suggestions-label">Quick add</span>
+          <div id="suggestion-row" class="suggestion-row"></div>
+        </div>
+
         <ul id="tracked-list" class="tracked-list"></ul>
-        <div class="state-controls">
-          <input id="tracked-input" placeholder="exe name (e.g. Discord.exe)" />
-          <button id="tracked-add" type="button">Add</button>
-        </div>
-        <div class="recent-row">
-          <span class="recent-label">Recent foregrounds:</span>
-          <div id="recent-list" class="recent-chips">
-            <span class="recent-empty">focus another app to populate</span>
-          </div>
+      </section>
+
+      <section class="settings-section">
+        <h2>Limits</h2>
+        <div class="form-grid">
+          <label class="field">
+            <span class="field-label">Usage minutes</span>
+            <span class="field-hint">How long a tracked app can be foreground before a break is due.</span>
+            <input id="cfg-usage" type="number" min="1" max="600" inputmode="numeric" />
+          </label>
+          <label class="field">
+            <span class="field-label">Break minutes</span>
+            <span class="field-hint">How long the cat overlays before tracking resumes.</span>
+            <input id="cfg-break" type="number" min="1" max="60" inputmode="numeric" />
+          </label>
         </div>
       </section>
 
-      <section class="panel">
-        <h2>Sensing (M2) — updates every 1s</h2>
-        <dl class="snapshot">
-          <dt>Foreground exe</dt><dd id="snap-exe">—</dd>
-          <dt>Idle for</dt><dd id="snap-idle">—</dd>
-          <dt>Fullscreen</dt><dd id="snap-fullscreen">—</dd>
-          <dt>Monitor</dt><dd id="snap-monitor">—</dd>
-        </dl>
+      <section class="settings-section">
+        <h2>Startup</h2>
+        <label class="toggle-row">
+          <input id="cfg-autostart" type="checkbox" />
+          <span>
+            <span class="toggle-label">Launch pawse on system startup</span>
+            <span class="field-hint">Adds pawse to your OS login items.</span>
+          </span>
+        </label>
       </section>
 
-      <section class="panel">
-        <h2>IPC smoke test</h2>
-        <form class="row" id="greet-form">
-          <input id="greet-input" placeholder="Enter a name..." />
-          <button type="submit">Greet</button>
-        </form>
-        <p id="greet-msg"></p>
-      </section>
+      <footer class="settings-footer">
+        <span>pawse runs in the system tray — close this window to keep it running.</span>
+      </footer>
     </main>
+
+    <div id="picker-overlay" class="modal-overlay" hidden>
+      <div class="modal" role="dialog" aria-labelledby="picker-title">
+        <header class="modal-head">
+          <h2 id="picker-title">Add a tracked app</h2>
+          <button id="picker-close" type="button" class="modal-close" aria-label="Close">×</button>
+        </header>
+        <div class="modal-search">
+          <input id="picker-search" type="search" placeholder="Filter running apps…" />
+          <button id="picker-refresh" type="button" class="btn-ghost">Refresh</button>
+        </div>
+        <ul id="picker-list" class="picker-list">
+          <li class="picker-empty">Loading running apps…</li>
+        </ul>
+      </div>
+    </div>
   </body>
 </html>

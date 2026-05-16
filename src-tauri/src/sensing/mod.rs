@@ -22,6 +22,12 @@ pub struct MonitorRef {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct RunningProcess {
+    pub exe: String,
+    pub title: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct ForegroundSnapshot {
     pub exe: Option<String>,
     pub idle_for_secs: u64,
@@ -93,4 +99,19 @@ pub fn snapshot() -> ForegroundSnapshot {
 #[cfg(not(any(target_os = "windows", target_os = "macos")))]
 pub fn snapshot() -> ForegroundSnapshot {
     ForegroundSnapshot::empty()
+}
+
+#[cfg(target_os = "windows")]
+pub fn list_running_processes() -> Vec<RunningProcess> {
+    win::list_running_processes()
+}
+
+#[cfg(target_os = "macos")]
+pub fn list_running_processes() -> Vec<RunningProcess> {
+    mac::list_running_processes()
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
+pub fn list_running_processes() -> Vec<RunningProcess> {
+    Vec::new()
 }

@@ -1,7 +1,8 @@
-use super::{ForegroundSnapshot, MonitorRef};
+use super::{ForegroundSnapshot, MonitorRef, RunningProcess};
 
 use windows::core::{BOOL, PWSTR};
 use windows::Win32::Foundation::{CloseHandle, HANDLE, HWND, LPARAM, RECT};
+use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED};
 use windows::Win32::Graphics::Gdi::{
     EnumDisplayMonitors, GetMonitorInfoW, MonitorFromWindow, HDC, HMONITOR, MONITORINFO,
     MONITOR_DEFAULTTONULL,
@@ -12,7 +13,9 @@ use windows::Win32::System::Threading::{
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{GetLastInputInfo, LASTINPUTINFO};
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetForegroundWindow, GetWindowRect, GetWindowThreadProcessId,
+    EnumWindows, GetForegroundWindow, GetWindow, GetWindowLongW, GetWindowRect,
+    GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId, IsWindowVisible, GWL_EXSTYLE,
+    GW_OWNER, WS_EX_TOOLWINDOW,
 };
 
 pub fn snapshot() -> ForegroundSnapshot {
@@ -132,6 +135,103 @@ unsafe extern "system" fn enum_proc(
     let monitors = unsafe { &mut *(lparam.0 as *mut Vec<HMONITOR>) };
     monitors.push(hmon);
     BOOL(1)
+}
+
+pub fn list_running_processes() -> Vec<RunningProcess> {
+    let mut entries: Vec<RunningProcess> = Vec::new();
+    unsafe {
+        let _ = EnumWindows(
+            Some(enum_window_proc),
+            LPARAM(&mut entries as *mut _ as isize),
+        );
+    }
+
+    let self_exe = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.file_name().map(|f| f.to_string_lossy().into_owned()))
+        .unwrap_or_default();
+
+    let mut deduped: Vec<RunningProcess> = Vec::new();
+    for entry in entries {
+        if !self_exe.is_empty() && entry.exe.eq_ignore_ascii_case(&self_exe) {
+            continue;
+        }
+        if let Some(existing) = deduped
+            .iter_mut()
+            .find(|e| e.exe.eq_ignore_ascii_case(&entry.exe))
+        {
+            if existing.title.is_empty() && !entry.title.is_empty() {
+                existing.title = entry.title;
+            }
+        } else {
+            deduped.push(entry);
+        }
+    }
+    deduped.sort_by(|a, b| a.exe.to_lowercase().cmp(&b.exe.to_lowercase()));
+    deduped
+}
+
+unsafe extern "system" fn enum_window_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
+    unsafe {
+        let entries = &mut *(lparam.0 as *mut Vec<RunningProcess>);
+        if !is_user_window(hwnd) {
+            return BOOL(1);
+        }
+        let Some(exe) = foreground_exe(hwnd) else {
+            return BOOL(1);
+        };
+        let title = window_title(hwnd);
+        entries.push(RunningProcess { exe, title });
+    }
+    BOOL(1)
+}
+
+unsafe fn is_user_window(hwnd: HWND) -> bool {
+    unsafe {
+        if !IsWindowVisible(hwnd).as_bool() {
+            return false;
+        }
+        // Skip owned windows (tooltips, dialogs, etc.)
+        if !GetWindow(hwnd, GW_OWNER).map(|h| h.0.is_null()).unwrap_or(true) {
+            return false;
+        }
+        let ex = GetWindowLongW(hwnd, GWL_EXSTYLE) as u32;
+        if ex & WS_EX_TOOLWINDOW.0 != 0 {
+            return false;
+        }
+        // Filter cloaked windows (UWP background processes etc.)
+        let mut cloaked: u32 = 0;
+        if DwmGetWindowAttribute(
+            hwnd,
+            DWMWA_CLOAKED,
+            &mut cloaked as *mut _ as *mut std::ffi::c_void,
+            std::mem::size_of::<u32>() as u32,
+        )
+        .is_ok()
+            && cloaked != 0
+        {
+            return false;
+        }
+        if GetWindowTextLengthW(hwnd) == 0 {
+            return false;
+        }
+        true
+    }
+}
+
+unsafe fn window_title(hwnd: HWND) -> String {
+    unsafe {
+        let len = GetWindowTextLengthW(hwnd);
+        if len <= 0 {
+            return String::new();
+        }
+        let mut buf = vec![0u16; (len + 1) as usize];
+        let written = GetWindowTextW(hwnd, &mut buf);
+        if written <= 0 {
+            return String::new();
+        }
+        String::from_utf16_lossy(&buf[..written as usize])
+    }
 }
 
 fn enumerate_monitors() -> Vec<HMONITOR> {

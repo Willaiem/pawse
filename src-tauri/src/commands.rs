@@ -3,9 +3,10 @@ use tauri::{AppHandle, Emitter, State};
 
 use crate::budget::{AppState, BudgetState, Config};
 use crate::overlay;
-use crate::sensing::{ForegroundSnapshot, SensingState};
+use crate::sensing::{self, ForegroundSnapshot, RunningProcess, SensingState};
 use crate::tray;
 use tauri::Manager;
+use tauri_plugin_autostart::ManagerExt;
 
 #[tauri::command]
 pub fn greet(name: &str) -> String {
@@ -74,6 +75,13 @@ pub fn current_snapshot(state: State<'_, SensingState>) -> ForegroundSnapshot {
 #[tauri::command]
 pub fn recent_foregrounds(state: State<'_, SensingState>) -> Vec<String> {
     state.recent.lock().unwrap().clone()
+}
+
+#[tauri::command]
+pub async fn list_running_processes() -> Vec<RunningProcess> {
+    tauri::async_runtime::spawn_blocking(sensing::list_running_processes)
+        .await
+        .unwrap_or_default()
 }
 
 #[tauri::command]
@@ -161,6 +169,28 @@ pub fn set_break_minutes(
     }
     let mut m = state.machine.lock().unwrap();
     m.config.break_minutes = minutes;
+    m.save_config().map_err(|e| e.to_string())?;
+    let cfg = m.config.clone();
+    drop(m);
+    let _ = app.emit("config-changed", &cfg);
+    Ok(cfg)
+}
+
+#[tauri::command]
+pub fn set_autostart(
+    app: AppHandle,
+    state: State<'_, BudgetState>,
+    enabled: bool,
+) -> Result<Config, String> {
+    let manager = app.autolaunch();
+    let currently = manager.is_enabled().unwrap_or(false);
+    if enabled && !currently {
+        manager.enable().map_err(|e| e.to_string())?;
+    } else if !enabled && currently {
+        manager.disable().map_err(|e| e.to_string())?;
+    }
+    let mut m = state.machine.lock().unwrap();
+    m.config.autostart = enabled;
     m.save_config().map_err(|e| e.to_string())?;
     let cfg = m.config.clone();
     drop(m);
