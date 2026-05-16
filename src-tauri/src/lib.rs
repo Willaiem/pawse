@@ -1,11 +1,12 @@
 mod budget;
 mod commands;
+mod overlay;
 mod sensing;
 
 use std::time::Duration;
 use tauri::{Emitter, Manager};
 
-use budget::{BudgetMachine, BudgetState};
+use budget::{AppState, BudgetMachine, BudgetState};
 use sensing::SensingState;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -51,6 +52,20 @@ pub fn run() {
                             t.to.kind_label()
                         );
                         let _ = handle.emit("state-changed", &t.to);
+
+                        let entering_break = matches!(t.to, AppState::Break { .. });
+                        let leaving_break = matches!(t.from, AppState::Break { .. });
+
+                        if entering_break {
+                            let monitor_index = snap.monitor_index.unwrap_or(0);
+                            if let Err(e) =
+                                overlay::open_cat_window(&handle, monitor_index).await
+                            {
+                                eprintln!("[pawse] failed to open cat overlay: {e}");
+                            }
+                        } else if leaving_break {
+                            overlay::close_cat_window(&handle);
+                        }
                     }
 
                     tokio::time::sleep(Duration::from_secs(1)).await;

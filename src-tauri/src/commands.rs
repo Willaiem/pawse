@@ -1,10 +1,8 @@
 use serde::Serialize;
-use tauri::{
-    AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, State, WebviewUrl,
-    WebviewWindowBuilder,
-};
+use tauri::{AppHandle, Emitter, State};
 
 use crate::budget::{AppState, BudgetState, Config};
+use crate::overlay;
 use crate::sensing::{ForegroundSnapshot, SensingState};
 
 #[tauri::command]
@@ -57,56 +55,12 @@ pub fn list_monitors(app: AppHandle) -> Result<Vec<MonitorInfo>, String> {
 
 #[tauri::command]
 pub async fn show_cat(app: AppHandle, monitor_index: usize) -> Result<(), String> {
-    if let Some(existing) = app.get_webview_window("cat") {
-        let _ = existing.close();
-        tokio::time::sleep(std::time::Duration::from_millis(80)).await;
-    }
-
-    let monitors = app.available_monitors().map_err(|e| e.to_string())?;
-    let monitor = monitors
-        .get(monitor_index)
-        .ok_or_else(|| format!("monitor {monitor_index} not found"))?;
-    let pos = monitor.position();
-    let size = monitor.size();
-
-    let window = WebviewWindowBuilder::new(&app, "cat", WebviewUrl::App("cat.html".into()))
-        .title("pawse")
-        .decorations(false)
-        .always_on_top(true)
-        .skip_taskbar(true)
-        .resizable(false)
-        .transparent(true)
-        .shadow(false)
-        .visible(false)
-        .build()
-        .map_err(|e| e.to_string())?;
-
-    window
-        .set_position(PhysicalPosition::new(pos.x, pos.y))
-        .map_err(|e| e.to_string())?;
-    window
-        .set_size(PhysicalSize::new(size.width, size.height))
-        .map_err(|e| e.to_string())?;
-    window.show().map_err(|e| e.to_string())?;
-    window.set_focus().map_err(|e| e.to_string())?;
-
-    // M1: hardcoded 5s auto-close. M4 hands this off to the state machine.
-    let app_handle = app.clone();
-    tauri::async_runtime::spawn(async move {
-        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-        if let Some(w) = app_handle.get_webview_window("cat") {
-            let _ = w.close();
-        }
-    });
-
-    Ok(())
+    overlay::open_cat_window(&app, monitor_index).await
 }
 
 #[tauri::command]
 pub fn hide_cat(app: AppHandle) -> Result<(), String> {
-    if let Some(w) = app.get_webview_window("cat") {
-        w.close().map_err(|e| e.to_string())?;
-    }
+    overlay::close_cat_window(&app);
     Ok(())
 }
 
