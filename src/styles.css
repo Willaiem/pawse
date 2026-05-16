@@ -126,6 +126,25 @@ button {
   width: 100%;
 }
 
+.snapshot {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.35em 1em;
+  text-align: left;
+  margin: 0.5em 0 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.95em;
+}
+
+.snapshot dt {
+  opacity: 0.6;
+}
+
+.snapshot dd {
+  margin: 0;
+  word-break: break-all;
+}
+
 @media (prefers-color-scheme: dark) {
   :root {
     color: #f6f6f6;

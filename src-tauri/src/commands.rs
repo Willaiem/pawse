@@ -1,5 +1,7 @@
 use serde::Serialize;
-use tauri::{AppHandle, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, Manager, PhysicalPosition, PhysicalSize, State, WebviewUrl, WebviewWindowBuilder};
+
+use crate::sensing::{ForegroundSnapshot, SensingState};
 
 #[tauri::command]
 pub fn greet(name: &str) -> String {
@@ -53,7 +55,6 @@ pub fn list_monitors(app: AppHandle) -> Result<Vec<MonitorInfo>, String> {
 pub async fn show_cat(app: AppHandle, monitor_index: usize) -> Result<(), String> {
     if let Some(existing) = app.get_webview_window("cat") {
         let _ = existing.close();
-        // Give the webview label time to free up.
         tokio::time::sleep(std::time::Duration::from_millis(80)).await;
     }
 
@@ -76,7 +77,6 @@ pub async fn show_cat(app: AppHandle, monitor_index: usize) -> Result<(), String
         .build()
         .map_err(|e| e.to_string())?;
 
-    // Use physical units to dodge per-monitor DPI surprises.
     window
         .set_position(PhysicalPosition::new(pos.x, pos.y))
         .map_err(|e| e.to_string())?;
@@ -86,7 +86,7 @@ pub async fn show_cat(app: AppHandle, monitor_index: usize) -> Result<(), String
     window.show().map_err(|e| e.to_string())?;
     window.set_focus().map_err(|e| e.to_string())?;
 
-    // M1: hardcoded 5s auto-close. M3+ will hand this off to the state machine.
+    // M1: hardcoded 5s auto-close. M4 hands this off to the state machine.
     let app_handle = app.clone();
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(std::time::Duration::from_secs(5)).await;
@@ -104,4 +104,9 @@ pub fn hide_cat(app: AppHandle) -> Result<(), String> {
         w.close().map_err(|e| e.to_string())?;
     }
     Ok(())
+}
+
+#[tauri::command]
+pub fn current_snapshot(state: State<'_, SensingState>) -> ForegroundSnapshot {
+    state.latest.lock().unwrap().clone()
 }
