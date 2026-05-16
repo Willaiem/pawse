@@ -69,8 +69,18 @@ pub fn run() {
 
             let sensing_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
+                let mut prev_fullscreen: Option<bool> = None;
                 loop {
                     let snap = sensing::snapshot();
+
+                    if prev_fullscreen != Some(snap.is_fullscreen) {
+                        eprintln!(
+                            "[pawse] fullscreen={} (exe={})",
+                            snap.is_fullscreen,
+                            snap.exe.as_deref().unwrap_or("?")
+                        );
+                        prev_fullscreen = Some(snap.is_fullscreen);
+                    }
 
                     let sensing_state = sensing_handle.state::<SensingState>();
                     *sensing_state.latest.lock().unwrap() = snap.clone();
