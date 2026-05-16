@@ -21,6 +21,30 @@
       </section>
 
       <section class="panel">
+        <h2>State machine (M3)</h2>
+        <div class="state-kind"><span id="state-kind">—</span> <span id="state-remaining" class="state-remaining"></span></div>
+        <div class="state-controls">
+          <label>Usage minutes <input id="cfg-usage" type="number" min="1" max="600" /></label>
+          <label>Break minutes <input id="cfg-break" type="number" min="1" max="60" /></label>
+        </div>
+        <div class="state-controls">
+          <button id="snooze-btn" type="button">Snooze 30 min</button>
+        </div>
+        <h3>Tracked apps</h3>
+        <ul id="tracked-list" class="tracked-list"></ul>
+        <div class="state-controls">
+          <input id="tracked-input" placeholder="exe name (e.g. Discord.exe)" />
+          <button id="tracked-add" type="button">Add</button>
+        </div>
+        <div class="recent-row">
+          <span class="recent-label">Recent foregrounds:</span>
+          <div id="recent-list" class="recent-chips">
+            <span class="recent-empty">focus another app to populate</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
         <h2>Sensing (M2) — updates every 1s</h2>
         <dl class="snapshot">
           <dt>Foreground exe</dt><dd id="snap-exe">—</dd>

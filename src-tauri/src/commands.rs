@@ -1,6 +1,10 @@
 use serde::Serialize;
-use tauri::{AppHandle, Manager, PhysicalPosition, PhysicalSize, State, WebviewUrl, WebviewWindowBuilder};
+use tauri::{
+    AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, State, WebviewUrl,
+    WebviewWindowBuilder,
+};
 
+use crate::budget::{AppState, BudgetState, Config};
 use crate::sensing::{ForegroundSnapshot, SensingState};
 
 #[tauri::command]
@@ -109,4 +113,123 @@ pub fn hide_cat(app: AppHandle) -> Result<(), String> {
 #[tauri::command]
 pub fn current_snapshot(state: State<'_, SensingState>) -> ForegroundSnapshot {
     state.latest.lock().unwrap().clone()
+}
+
+#[tauri::command]
+pub fn recent_foregrounds(state: State<'_, SensingState>) -> Vec<String> {
+    state.recent.lock().unwrap().clone()
+}
+
+#[tauri::command]
+pub fn get_app_state(state: State<'_, BudgetState>) -> AppState {
+    state.machine.lock().unwrap().state.clone()
+}
+
+#[tauri::command]
+pub fn get_config(state: State<'_, BudgetState>) -> Config {
+    state.machine.lock().unwrap().config.clone()
+}
+
+#[tauri::command]
+pub fn add_tracked_app(
+    app: AppHandle,
+    state: State<'_, BudgetState>,
+    exe: String,
+) -> Result<Config, String> {
+    let trimmed = exe.trim().to_string();
+    if trimmed.is_empty() {
+        return Err("exe cannot be empty".into());
+    }
+    let mut m = state.machine.lock().unwrap();
+    if !m
+        .config
+        .tracked_apps
+        .iter()
+        .any(|t| t.eq_ignore_ascii_case(&trimmed))
+    {
+        m.config.tracked_apps.push(trimmed);
+        m.save_config().map_err(|e| e.to_string())?;
+    }
+    let cfg = m.config.clone();
+    drop(m);
+    let _ = app.emit("config-changed", &cfg);
+    Ok(cfg)
+}
+
+#[tauri::command]
+pub fn remove_tracked_app(
+    app: AppHandle,
+    state: State<'_, BudgetState>,
+    exe: String,
+) -> Result<Config, String> {
+    let mut m = state.machine.lock().unwrap();
+    let before = m.config.tracked_apps.len();
+    m.config
+        .tracked_apps
+        .retain(|t| !t.eq_ignore_ascii_case(&exe));
+    if m.config.tracked_apps.len() != before {
+        m.save_config().map_err(|e| e.to_string())?;
+    }
+    let cfg = m.config.clone();
+    drop(m);
+    let _ = app.emit("config-changed", &cfg);
+    Ok(cfg)
+}
+
+#[tauri::command]
+pub fn set_usage_minutes(
+    app: AppHandle,
+    state: State<'_, BudgetState>,
+    minutes: u32,
+) -> Result<Config, String> {
+    if !(1..=600).contains(&minutes) {
+        return Err("usage_minutes must be 1..=600".into());
+    }
+    let mut m = state.machine.lock().unwrap();
+    m.config.usage_minutes = minutes;
+    m.save_config().map_err(|e| e.to_string())?;
+    let cfg = m.config.clone();
+    drop(m);
+    let _ = app.emit("config-changed", &cfg);
+    Ok(cfg)
+}
+
+#[tauri::command]
+pub fn set_break_minutes(
+    app: AppHandle,
+    state: State<'_, BudgetState>,
+    minutes: u32,
+) -> Result<Config, String> {
+    if !(1..=60).contains(&minutes) {
+        return Err("break_minutes must be 1..=60".into());
+    }
+    let mut m = state.machine.lock().unwrap();
+    m.config.break_minutes = minutes;
+    m.save_config().map_err(|e| e.to_string())?;
+    let cfg = m.config.clone();
+    drop(m);
+    let _ = app.emit("config-changed", &cfg);
+    Ok(cfg)
+}
+
+#[tauri::command]
+pub fn snooze(
+    app: AppHandle,
+    state: State<'_, BudgetState>,
+    seconds: u64,
+) -> Result<AppState, String> {
+    if seconds == 0 {
+        return Err("seconds must be > 0".into());
+    }
+    let transition = {
+        let mut m = state.machine.lock().unwrap();
+        m.snooze_for(seconds)
+    };
+    eprintln!(
+        "[pawse] {} -> {}",
+        transition.from.kind_label(),
+        transition.to.kind_label()
+    );
+    let _ = app.emit("state-changed", &transition.to);
+    Ok(transition.to)
 }

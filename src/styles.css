@@ -145,6 +145,115 @@ button {
   word-break: break-all;
 }
 
+.state-kind {
+  display: flex;
+  justify-content: center;
+  align-items: baseline;
+  gap: 0.6em;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 1.4em;
+  margin: 0.25em 0 0.5em;
+}
+
+.state-kind #state-kind {
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.state-kind #state-kind[data-kind="break"] { color: #d94f4f; }
+.state-kind #state-kind[data-kind="active"] { color: #2c8c5f; }
+.state-kind #state-kind[data-kind="snoozed"] { color: #b58000; }
+.state-kind #state-kind[data-kind="deferred_break"] { color: #a04ad6; }
+
+.state-remaining {
+  opacity: 0.7;
+  font-size: 0.85em;
+}
+
+.state-controls {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.5em;
+  margin: 0.5em 0;
+}
+
+.state-controls label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4em;
+}
+
+.state-controls input[type="number"] {
+  width: 6em;
+}
+
+.tracked-list {
+  list-style: none;
+  padding: 0;
+  margin: 0.5em 0;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3em;
+}
+
+.tracked-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5em;
+  padding: 0.35em 0.6em;
+  border: 1px solid rgba(127, 127, 127, 0.25);
+  border-radius: 6px;
+}
+
+.tracked-empty {
+  opacity: 0.6;
+  font-style: italic;
+  text-align: center;
+}
+
+.recent-row {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.3em;
+  margin: 0.4em 0;
+}
+
+.recent-label {
+  font-size: 0.85em;
+  opacity: 0.7;
+}
+
+.recent-chips {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.4em;
+  min-height: 1.6em;
+}
+
+.recent-chip {
+  padding: 0.25em 0.7em;
+  font-size: 0.9em;
+  border-radius: 999px;
+  background: rgba(127, 127, 127, 0.1);
+  border: 1px solid rgba(127, 127, 127, 0.3);
+}
+
+.recent-chip:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.recent-empty {
+  font-size: 0.85em;
+  opacity: 0.5;
+  font-style: italic;
+}
+
 @media (prefers-color-scheme: dark) {
   :root {
     color: #f6f6f6;

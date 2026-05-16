@@ -1,5 +1,17 @@
 use serde::Serialize;
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
+
+const RECENT_CAP: usize = 5;
+
+fn self_exe_name() -> &'static str {
+    static NAME: OnceLock<String> = OnceLock::new();
+    NAME.get_or_init(|| {
+        std::env::current_exe()
+            .ok()
+            .and_then(|p| p.file_name().map(|f| f.to_string_lossy().into_owned()))
+            .unwrap_or_else(|| String::from("pawse.exe"))
+    })
+}
 
 #[derive(Debug, Clone, Serialize)]
 pub struct MonitorRef {
@@ -32,12 +44,33 @@ impl ForegroundSnapshot {
 
 pub struct SensingState {
     pub latest: Mutex<ForegroundSnapshot>,
+    pub recent: Mutex<Vec<String>>,
 }
 
 impl Default for SensingState {
     fn default() -> Self {
         Self {
             latest: Mutex::new(ForegroundSnapshot::empty()),
+            recent: Mutex::new(Vec::new()),
+        }
+    }
+}
+
+impl SensingState {
+    pub fn record_foreground(&self, snap: &ForegroundSnapshot) {
+        let Some(exe) = snap.exe.as_deref() else {
+            return;
+        };
+        if exe.eq_ignore_ascii_case(self_exe_name()) {
+            return;
+        }
+        let mut recent = self.recent.lock().unwrap();
+        if let Some(pos) = recent.iter().position(|e| e.eq_ignore_ascii_case(exe)) {
+            recent.remove(pos);
+        }
+        recent.insert(0, exe.to_string());
+        if recent.len() > RECENT_CAP {
+            recent.truncate(RECENT_CAP);
         }
     }
 }
