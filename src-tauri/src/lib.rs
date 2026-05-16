@@ -152,9 +152,20 @@ pub fn run() {
             commands::set_usage_minutes,
             commands::set_break_minutes,
             commands::snooze,
+            commands::cancel_snooze,
             commands::set_autostart,
             commands::close_snooze_window,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|handle, event| {
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Reopen { has_visible_windows, .. } = event {
+                if !has_visible_windows {
+                    tray::show_main_window(handle);
+                }
+            }
+            #[cfg(not(target_os = "macos"))]
+            let _ = (handle, event);
+        });
 }

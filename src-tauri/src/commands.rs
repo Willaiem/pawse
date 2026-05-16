@@ -228,3 +228,21 @@ pub fn snooze(
     tray::update_tooltip(&app);
     Ok(transition.to)
 }
+
+#[tauri::command]
+pub fn cancel_snooze(app: AppHandle, state: State<'_, BudgetState>) -> Result<AppState, String> {
+    let transition = {
+        let mut m = state.machine.lock().unwrap();
+        m.cancel_snooze()
+    };
+    let next_state = match transition {
+        Some(t) => {
+            eprintln!("[pawse] {} -> {}", t.from.kind_label(), t.to.kind_label());
+            let _ = app.emit("state-changed", &t.to);
+            t.to
+        }
+        None => state.machine.lock().unwrap().state.clone(),
+    };
+    tray::update_tooltip(&app);
+    Ok(next_state)
+}

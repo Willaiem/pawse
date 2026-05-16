@@ -1,7 +1,8 @@
 use std::time::Duration;
 
 use tauri::{
-    AppHandle, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindowBuilder,
+    webview::Color, AppHandle, Manager, PhysicalPosition, PhysicalSize, WebviewUrl,
+    WebviewWindowBuilder,
 };
 
 pub const CAT_WINDOW_LABEL: &str = "cat";
@@ -24,9 +25,11 @@ pub async fn open_cat_window(app: &AppHandle, monitor_index: usize) -> Result<()
         .title("pawse")
         .decorations(false)
         .always_on_top(true)
+        .visible_on_all_workspaces(true)
         .skip_taskbar(true)
         .resizable(false)
         .transparent(true)
+        .background_color(Color(0, 0, 0, 0))
         .shadow(false)
         .visible(false)
         .build()
@@ -38,9 +41,32 @@ pub async fn open_cat_window(app: &AppHandle, monitor_index: usize) -> Result<()
     window
         .set_size(PhysicalSize::new(size.width, size.height))
         .map_err(|e| e.to_string())?;
+
+    #[cfg(target_os = "macos")]
+    force_transparent_webview(&window);
+
     window.show().map_err(|e| e.to_string())?;
     window.set_focus().map_err(|e| e.to_string())?;
     Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn force_transparent_webview(window: &tauri::WebviewWindow) {
+    use objc2::msg_send;
+    use objc2::runtime::AnyObject;
+
+    let _ = window.with_webview(|wv| unsafe {
+        let view = wv.inner() as *mut AnyObject;
+        if view.is_null() {
+            return;
+        }
+        let _: () = msg_send![view, setOpaque: false];
+
+        // KVC into WKWebView private `drawsBackground` flag — well-known idiom.
+        let no_number = objc2_foundation::NSNumber::new_bool(false);
+        let key = objc2_foundation::NSString::from_str("drawsBackground");
+        let _: () = msg_send![view, setValue: &*no_number, forKey: &*key];
+    });
 }
 
 pub fn close_cat_window(app: &AppHandle) {

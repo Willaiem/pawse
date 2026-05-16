@@ -16,18 +16,30 @@
         cursor: none;
       }
       video {
-        width: 100%;
-        height: 100%;
-        object-fit: cover;
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        opacity: 0;
+        pointer-events: none;
+      }
+      canvas {
         display: block;
+        width: 100vw;
+        height: 100vh;
         background: transparent;
       }
     </style>
   </head>
   <body>
-    <video id="cat" src="/neko1.webm" autoplay muted playsinline></video>
+    <video id="src" src="/neko1.webm" autoplay muted playsinline></video>
+    <canvas id="cat"></canvas>
     <script>
-      const v = document.getElementById("cat");
+      const v = document.getElementById("src");
+      const c = document.getElementById("cat");
+      const ctx = c.getContext("2d", { willReadFrequently: true });
+
+      const LUMA_THRESHOLD = 24;
+
       let phase = "intro";
       v.addEventListener("ended", () => {
         if (phase === "intro") {
@@ -37,6 +49,32 @@
           v.play().catch(() => {});
         }
       });
+
+      function sizeCanvas() {
+        if (v.videoWidth > 0 && v.videoHeight > 0) {
+          if (c.width !== v.videoWidth) c.width = v.videoWidth;
+          if (c.height !== v.videoHeight) c.height = v.videoHeight;
+        }
+      }
+      v.addEventListener("loadedmetadata", sizeCanvas);
+
+      function render() {
+        sizeCanvas();
+        if (v.readyState >= 2 && c.width > 0 && c.height > 0) {
+          ctx.drawImage(v, 0, 0, c.width, c.height);
+          const img = ctx.getImageData(0, 0, c.width, c.height);
+          const d = img.data;
+          const len = d.length;
+          for (let i = 0; i < len; i += 4) {
+            if (d[i] + d[i + 1] + d[i + 2] < LUMA_THRESHOLD) {
+              d[i + 3] = 0;
+            }
+          }
+          ctx.putImageData(img, 0, 0);
+        }
+        requestAnimationFrame(render);
+      }
+      render();
     </script>
   </body>
 </html>

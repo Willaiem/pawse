@@ -209,6 +209,23 @@ impl BudgetMachine {
         }
     }
 
+    pub fn cancel_snooze(&mut self) -> Option<Transition> {
+        if !matches!(self.state, AppState::Snoozed { .. }) {
+            return None;
+        }
+        let prev = self.state.clone();
+        self.state = AppState::Active {
+            remaining_secs: self.config.usage_minutes.saturating_mul(60).max(1),
+        };
+        if let Err(e) = write_json(&self.state_path, &self.state) {
+            eprintln!("[pawse] failed to persist state after cancel_snooze: {e}");
+        }
+        Some(Transition {
+            from: prev,
+            to: self.state.clone(),
+        })
+    }
+
     pub fn save_config(&self) -> Result<(), std::io::Error> {
         write_json(&self.config_path, &self.config)
     }

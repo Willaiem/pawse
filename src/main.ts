@@ -18,7 +18,10 @@ type Config = {
 
 type RunningProcess = { exe: string; title: string };
 
-const SUGGESTIONS = ["Discord.exe", "Steam.exe", "slack.exe"];
+const IS_MAC = navigator.userAgent.toLowerCase().includes("mac os");
+const SUGGESTIONS = IS_MAC
+  ? ["Discord", "Steam", "Slack"]
+  : ["Discord.exe", "Steam.exe", "slack.exe"];
 
 let currentConfig: Config | null = null;
 
@@ -73,7 +76,7 @@ async function pollState() {
 }
 
 function avatarLetter(exe: string): string {
-  return (exe.replace(/\.exe$/i, "").charAt(0) || "?").toUpperCase();
+  return (exe.replace(/\.(exe|app)$/i, "").charAt(0) || "?").toUpperCase();
 }
 
 function renderTrackedApps(cfg: Config) {
@@ -130,7 +133,7 @@ function renderSuggestions(cfg: Config) {
     chip.type = "button";
     chip.className = "suggestion-chip";
     chip.setAttribute("aria-pressed", tracked ? "true" : "false");
-    chip.textContent = exe.replace(/\.exe$/i, "");
+    chip.textContent = exe.replace(/\.(exe|app)$/i, "");
     chip.title = tracked ? `Remove ${exe}` : `Add ${exe}`;
     chip.addEventListener("click", async () => {
       try {

@@ -2,7 +2,7 @@ use tauri::{
     image::Image,
     menu::{Menu, MenuItem},
     tray::{MouseButton, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindowBuilder,
+    AppHandle, LogicalPosition, Manager, WebviewUrl, WebviewWindowBuilder, Wry,
 };
 
 use crate::budget::{AppState, BudgetState};
@@ -14,12 +14,23 @@ const MENU_ID_SNOOZE: &str = "snooze";
 const MENU_ID_SETTINGS: &str = "settings";
 const MENU_ID_QUIT: &str = "quit";
 
+const SNOOZE_LABEL_OPEN: &str = "Snooze 30 min…";
+const SNOOZE_LABEL_CANCEL: &str = "Cancel snooze";
+
+struct TrayMenuState {
+    snooze_item: MenuItem<Wry>,
+}
+
 pub fn build(app: &AppHandle) -> tauri::Result<()> {
-    let snooze_item = MenuItem::with_id(app, MENU_ID_SNOOZE, "Snooze 30 min…", true, None::<&str>)?;
+    let snooze_item =
+        MenuItem::with_id(app, MENU_ID_SNOOZE, SNOOZE_LABEL_OPEN, true, None::<&str>)?;
     let settings_item =
         MenuItem::with_id(app, MENU_ID_SETTINGS, "Open Settings", true, None::<&str>)?;
     let quit_item = MenuItem::with_id(app, MENU_ID_QUIT, "Quit pawse", true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&snooze_item, &settings_item, &quit_item])?;
+    app.manage(TrayMenuState {
+        snooze_item: snooze_item.clone(),
+    });
 
     let icon = app
         .default_window_icon()
@@ -31,9 +42,9 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
         .icon_as_template(true)
         .tooltip("pawse — starting up…")
         .menu(&menu)
-        .show_menu_on_left_click(false)
+        .show_menu_on_left_click(cfg!(target_os = "macos"))
         .on_menu_event(|app, event| match event.id.as_ref() {
-            MENU_ID_SNOOZE => open_snooze_window(app),
+            MENU_ID_SNOOZE => handle_snooze_menu(app),
             MENU_ID_SETTINGS => show_main_window(app),
             MENU_ID_QUIT => app.exit(0),
             _ => {}
@@ -53,6 +64,8 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
 }
 
 pub fn show_main_window(app: &AppHandle) {
+    #[cfg(target_os = "macos")]
+    let _ = app.show();
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.show();
         let _ = window.unminimize();
@@ -70,7 +83,7 @@ pub fn open_snooze_window(app: &AppHandle) {
     let width: u32 = 360;
     let height: u32 = 170;
 
-    let (pos_x, pos_y) = center_on_cursor_monitor(app, width, height);
+    let pos = center_on_cursor_monitor(app, width, height);
 
     let result = WebviewWindowBuilder::new(
         app,
@@ -83,6 +96,7 @@ pub fn open_snooze_window(app: &AppHandle) {
     .minimizable(false)
     .maximizable(false)
     .always_on_top(true)
+    .visible_on_all_workspaces(true)
     .skip_taskbar(true)
     .decorations(false)
     .visible(false)
@@ -90,8 +104,7 @@ pub fn open_snooze_window(app: &AppHandle) {
 
     match result {
         Ok(window) => {
-            let _ = window.set_size(PhysicalSize::new(width, height));
-            let _ = window.set_position(PhysicalPosition::new(pos_x, pos_y));
+            let _ = window.set_position(pos);
             let _ = window.show();
             let _ = window.set_focus();
         }
@@ -99,7 +112,7 @@ pub fn open_snooze_window(app: &AppHandle) {
     }
 }
 
-fn center_on_cursor_monitor(app: &AppHandle, w: u32, h: u32) -> (i32, i32) {
+fn center_on_cursor_monitor(app: &AppHandle, w: u32, h: u32) -> LogicalPosition<f64> {
     let monitor = app
         .cursor_position()
         .ok()
@@ -120,13 +133,18 @@ fn center_on_cursor_monitor(app: &AppHandle, w: u32, h: u32) -> (i32, i32) {
         .or_else(|| app.primary_monitor().ok().flatten());
 
     if let Some(m) = monitor {
-        let p = m.position();
-        let s = m.size();
-        let x = p.x + ((s.width as i32 - w as i32) / 2).max(0);
-        let y = p.y + ((s.height as i32 - h as i32) / 2).max(0);
-        (x, y)
+        let scale = m.scale_factor();
+        let pos = m.position();
+        let size = m.size();
+        let logical_x = pos.x as f64 / scale;
+        let logical_y = pos.y as f64 / scale;
+        let logical_w = size.width as f64 / scale;
+        let logical_h = size.height as f64 / scale;
+        let x = logical_x + ((logical_w - w as f64) / 2.0).max(0.0);
+        let y = logical_y + ((logical_h - h as f64) / 2.0).max(0.0);
+        LogicalPosition::new(x, y)
     } else {
-        (100, 100)
+        LogicalPosition::new(100.0, 100.0)
     }
 }
 
@@ -138,6 +156,35 @@ pub fn update_tooltip(app: &AppHandle) {
     let tip = tooltip_for(&state);
     if let Some(tray) = app.tray_by_id(TRAY_ID) {
         let _ = tray.set_tooltip(Some(tip));
+    }
+    if let Some(tray_state) = app.try_state::<TrayMenuState>() {
+        let label = if matches!(state, AppState::Snoozed { .. }) {
+            SNOOZE_LABEL_CANCEL
+        } else {
+            SNOOZE_LABEL_OPEN
+        };
+        let _ = tray_state.snooze_item.set_text(label);
+    }
+}
+
+fn handle_snooze_menu(app: &AppHandle) {
+    let Some(budget) = app.try_state::<BudgetState>() else {
+        open_snooze_window(app);
+        return;
+    };
+    let snoozed = matches!(
+        budget.machine.lock().unwrap().state,
+        AppState::Snoozed { .. }
+    );
+    if snoozed {
+        let transition = budget.machine.lock().unwrap().cancel_snooze();
+        if let Some(t) = transition {
+            eprintln!("[pawse] {} -> {}", t.from.kind_label(), t.to.kind_label());
+            let _ = tauri::Emitter::emit(app, "state-changed", &t.to);
+        }
+        update_tooltip(app);
+    } else {
+        open_snooze_window(app);
     }
 }
 
