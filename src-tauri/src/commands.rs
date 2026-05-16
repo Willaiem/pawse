@@ -4,6 +4,8 @@ use tauri::{AppHandle, Emitter, State};
 use crate::budget::{AppState, BudgetState, Config};
 use crate::overlay;
 use crate::sensing::{ForegroundSnapshot, SensingState};
+use crate::tray;
+use tauri::Manager;
 
 #[tauri::command]
 pub fn greet(name: &str) -> String {
@@ -167,6 +169,14 @@ pub fn set_break_minutes(
 }
 
 #[tauri::command]
+pub fn close_snooze_window(app: AppHandle) -> Result<(), String> {
+    if let Some(w) = app.get_webview_window(tray::SNOOZE_WINDOW_LABEL) {
+        w.close().map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
 pub fn snooze(
     app: AppHandle,
     state: State<'_, BudgetState>,
@@ -185,5 +195,6 @@ pub fn snooze(
         transition.to.kind_label()
     );
     let _ = app.emit("state-changed", &transition.to);
+    tray::update_tooltip(&app);
     Ok(transition.to)
 }

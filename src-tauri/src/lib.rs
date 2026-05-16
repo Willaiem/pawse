@@ -2,16 +2,26 @@ mod budget;
 mod commands;
 mod overlay;
 mod sensing;
+mod tray;
 
 use std::time::Duration;
-use tauri::{Emitter, Manager};
+use tauri::{Emitter, Manager, WindowEvent};
 
 use budget::{AppState, BudgetMachine, BudgetState};
 use sensing::SensingState;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let mut builder = tauri::Builder::default();
+
+    #[cfg(desktop)]
+    {
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            tray::show_main_window(app);
+        }));
+    }
+
+    builder
         .plugin(tauri_plugin_opener::init())
         .manage(SensingState::default())
         .setup(|app| {
@@ -31,17 +41,20 @@ pub fn run() {
             );
             app.manage(BudgetState::new(machine));
 
-            let handle = app.handle().clone();
+            tray::build(app.handle())?;
+            tray::update_tooltip(app.handle());
+
+            let sensing_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 loop {
                     let snap = sensing::snapshot();
 
-                    let sensing_state = handle.state::<SensingState>();
+                    let sensing_state = sensing_handle.state::<SensingState>();
                     *sensing_state.latest.lock().unwrap() = snap.clone();
                     sensing_state.record_foreground(&snap);
                     drop(sensing_state);
 
-                    let budget_state = handle.state::<BudgetState>();
+                    let budget_state = sensing_handle.state::<BudgetState>();
                     let transition = budget_state.machine.lock().unwrap().tick(&snap).0;
                     drop(budget_state);
 
@@ -51,7 +64,8 @@ pub fn run() {
                             t.from.kind_label(),
                             t.to.kind_label()
                         );
-                        let _ = handle.emit("state-changed", &t.to);
+                        let _ = sensing_handle.emit("state-changed", &t.to);
+                        tray::update_tooltip(&sensing_handle);
 
                         let entering_break = matches!(t.to, AppState::Break { .. });
                         let leaving_break = matches!(t.from, AppState::Break { .. });
@@ -59,12 +73,12 @@ pub fn run() {
                         if entering_break {
                             let monitor_index = snap.monitor_index.unwrap_or(0);
                             if let Err(e) =
-                                overlay::open_cat_window(&handle, monitor_index).await
+                                overlay::open_cat_window(&sensing_handle, monitor_index).await
                             {
                                 eprintln!("[pawse] failed to open cat overlay: {e}");
                             }
                         } else if leaving_break {
-                            overlay::close_cat_window(&handle);
+                            overlay::close_cat_window(&sensing_handle);
                         }
                     }
 
@@ -72,7 +86,23 @@ pub fn run() {
                 }
             });
 
+            let tooltip_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                loop {
+                    tokio::time::sleep(Duration::from_secs(60)).await;
+                    tray::update_tooltip(&tooltip_handle);
+                }
+            });
+
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            if window.label() == "main" {
+                if let WindowEvent::CloseRequested { api, .. } = event {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
         })
         .invoke_handler(tauri::generate_handler![
             commands::greet,
@@ -88,6 +118,7 @@ pub fn run() {
             commands::set_usage_minutes,
             commands::set_break_minutes,
             commands::snooze,
+            commands::close_snooze_window,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
