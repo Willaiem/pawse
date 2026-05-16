@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="stylesheet" href="/src/styles.css" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>pawse</title>
+    <script type="module" src="/src/main.ts" defer></script>
+  </head>
+
+  <body>
+    <main class="container">
+      <h1>pawse</h1>
+      <p class="tagline">Gentle interruption: a cat reminds you when an app's been on top too long.</p>
+
+      <section class="panel">
+        <h2>Cat overlay (M1)</h2>
+        <p>Pick a monitor to play the cat on. Auto-closes after 5 seconds.</p>
+        <div id="monitor-list" class="monitor-list">loading monitors…</div>
+        <button id="hide-cat" type="button">Hide cat now</button>
+      </section>
+
+      <section class="panel">
+        <h2>IPC smoke test</h2>
+        <form class="row" id="greet-form">
+          <input id="greet-input" placeholder="Enter a name..." />
+          <button type="submit">Greet</button>
+        </form>
+        <p id="greet-msg"></p>
+      </section>
+    </main>
+  </body>
+</html>
