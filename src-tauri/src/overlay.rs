@@ -1,8 +1,9 @@
 use std::time::Duration;
 
+#[cfg(target_os = "macos")]
+use tauri::webview::Color;
 use tauri::{
-    webview::Color, AppHandle, Manager, PhysicalPosition, PhysicalSize, WebviewUrl,
-    WebviewWindowBuilder,
+    AppHandle, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindowBuilder,
 };
 
 pub const CAT_WINDOW_LABEL: &str = "cat";
@@ -21,7 +22,8 @@ pub async fn open_cat_window(app: &AppHandle, monitor_index: usize) -> Result<()
     let pos = monitor.position();
     let size = monitor.size();
 
-    let window = WebviewWindowBuilder::new(app, CAT_WINDOW_LABEL, WebviewUrl::App("cat.html".into()))
+    #[allow(unused_mut)]
+    let mut builder = WebviewWindowBuilder::new(app, CAT_WINDOW_LABEL, WebviewUrl::App("cat.html".into()))
         .title("pawse")
         .decorations(false)
         .always_on_top(true)
@@ -29,11 +31,19 @@ pub async fn open_cat_window(app: &AppHandle, monitor_index: usize) -> Result<()
         .skip_taskbar(true)
         .resizable(false)
         .transparent(true)
-        .background_color(Color(0, 0, 0, 0))
         .shadow(false)
-        .visible(false)
-        .build()
-        .map_err(|e| e.to_string())?;
+        .visible(false);
+
+    // macOS WKWebView paints an opaque background unless we both flag the window
+    // transparent and force a clear webview background. On Windows, the WebView2
+    // compositor already honors `.transparent(true)`, and forcing a zero-alpha
+    // background_color introduces visible compositing artifacts around the cat.
+    #[cfg(target_os = "macos")]
+    {
+        builder = builder.background_color(Color(0, 0, 0, 0));
+    }
+
+    let window = builder.build().map_err(|e| e.to_string())?;
 
     window
         .set_position(PhysicalPosition::new(pos.x, pos.y))

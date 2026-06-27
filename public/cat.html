@@ -15,66 +15,122 @@
         overflow: hidden;
         cursor: none;
       }
-      video {
-        position: absolute;
-        width: 1px;
-        height: 1px;
-        opacity: 0;
+      .stage {
+        position: fixed;
+        inset: 0;
         pointer-events: none;
       }
-      canvas {
-        display: block;
-        width: 100vw;
-        height: 100vh;
-        background: transparent;
+      .stage video {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        filter: url(#chromakey);
+        will-change: opacity;
+      }
+      #vLoop {
+        opacity: 0;
+      }
+      .stage.looping #vIntro {
+        opacity: 0;
+      }
+      .stage.looping #vLoop {
+        opacity: 1;
+      }
+      #counter {
+        position: fixed;
+        top: 28px;
+        left: 36px;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        font-variant-numeric: tabular-nums;
+        font-size: 56px;
+        font-weight: 600;
+        line-height: 1;
+        color: #ffffff;
+        text-shadow: 0 2px 14px rgba(0, 0, 0, 0.85), 0 0 2px rgba(0, 0, 0, 0.6);
+        letter-spacing: 0.02em;
+        pointer-events: none;
+        user-select: none;
       }
     </style>
   </head>
   <body>
-    <video id="src" src="/neko1.webm" autoplay muted playsinline></video>
-    <canvas id="cat"></canvas>
+    <svg width="0" height="0" style="position: absolute" aria-hidden="true">
+      <defs>
+        <!--
+          Chroma-key the near-black video background.
+          alpha' = clamp(20*(R+G+B) - 1.5, 0, 1)
+          - R+G+B <= ~0.075 (luma ~19/255) → alpha 0 (transparent)
+          - R+G+B >= ~0.125 (luma ~32/255) → alpha 1 (opaque)
+          - In-between: soft edge for anti-aliased cat fur.
+        -->
+        <filter id="chromakey" color-interpolation-filters="sRGB">
+          <feColorMatrix
+            type="matrix"
+            values="1 0 0 0 0
+                    0 1 0 0 0
+                    0 0 1 0 0
+                    20 20 20 0 -1.5"
+          />
+        </filter>
+      </defs>
+    </svg>
+
+    <div class="stage" id="stage">
+      <video id="vIntro" src="/neko1.webm" autoplay muted playsinline preload="auto"></video>
+      <video id="vLoop" src="/neko2.webm" muted playsinline preload="auto" loop></video>
+    </div>
+
+    <div id="counter"></div>
+
     <script>
-      const v = document.getElementById("src");
-      const c = document.getElementById("cat");
-      const ctx = c.getContext("2d", { willReadFrequently: true });
+      const stage = document.getElementById("stage");
+      const vIntro = document.getElementById("vIntro");
+      const vLoop = document.getElementById("vLoop");
+      const counter = document.getElementById("counter");
 
-      const LUMA_THRESHOLD = 24;
+      // Decode the loop video alongside the intro so the swap is seamless.
+      vLoop.load();
 
-      let phase = "intro";
-      v.addEventListener("ended", () => {
-        if (phase === "intro") {
-          phase = "loop";
-          v.src = "/neko2.webm";
-          v.loop = true;
-          v.play().catch(() => {});
-        }
+      vIntro.addEventListener("ended", () => {
+        stage.classList.add("looping");
+        vLoop.play().catch(() => {});
       });
 
-      function sizeCanvas() {
-        if (v.videoWidth > 0 && v.videoHeight > 0) {
-          if (c.width !== v.videoWidth) c.width = v.videoWidth;
-          if (c.height !== v.videoHeight) c.height = v.videoHeight;
-        }
+      function fmt(s) {
+        if (s < 0) s = 0;
+        const m = Math.floor(s / 60);
+        const r = s % 60;
+        return `${m}:${r.toString().padStart(2, "0")}`;
       }
-      v.addEventListener("loadedmetadata", sizeCanvas);
 
-      function render() {
-        sizeCanvas();
-        if (v.readyState >= 2 && c.width > 0 && c.height > 0) {
-          ctx.drawImage(v, 0, 0, c.width, c.height);
-          const img = ctx.getImageData(0, 0, c.width, c.height);
-          const d = img.data;
-          const len = d.length;
-          for (let i = 0; i < len; i += 4) {
-            if (d[i] + d[i + 1] + d[i + 2] < LUMA_THRESHOLD) {
-              d[i + 3] = 0;
-            }
-          }
-          ctx.putImageData(img, 0, 0);
-        }
-        requestAnimationFrame(render);
+      let remaining = 0;
+      function paintCounter() {
+        counter.textContent = fmt(remaining);
       }
-      render();
+      paintCounter();
+
+      setInterval(() => {
+        if (remaining > 0) {
+          remaining -= 1;
+          paintCounter();
+        }
+      }, 1000);
+
+      (async () => {
+        const t = window.__TAURI__;
+        if (!t || !t.core) return;
+        try {
+          const state = await t.core.invoke("get_app_state");
+          if (state && state.kind === "break" && typeof state.remaining_secs === "number") {
+            remaining = state.remaining_secs;
+            paintCounter();
+          }
+        } catch (e) {
+          console.error("get_app_state failed:", e);
+        }
+      })();
     </script>
   </body>
 </html>
